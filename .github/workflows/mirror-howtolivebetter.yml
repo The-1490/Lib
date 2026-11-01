@@ -1,0 +1,45 @@
+name: Mirror HowToLiveBetter public website
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/mirror-howtolivebetter.yml'
+permissions:
+  contents: write
+concurrency:
+  group: mirror-howtolivebetter
+  cancel-in-progress: false
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download public same-host pages and assets
+        shell: bash
+        run: |
+          mkdir -p mirrors/howtolivebetter.net
+          cd mirrors/howtolivebetter.net
+          set +e
+          timeout 45m wget --mirror --page-requisites --convert-links --adjust-extension --domains=howtolivebetter.net --wait=1 --random-wait --timeout=30 --tries=2 --quota=500m --execute robots=on --output-file=crawl.log https://howtolivebetter.net/ https://howtolivebetter.net/book https://howtolivebetter.net/skills/howtolivebetter/SKILL.md https://howtolivebetter.net/ai/book/zh/index.md https://howtolivebetter.net/ai/articles/zh/index.md
+          result=$?
+          printf 'Source: https://howtolivebetter.net/\nFetched at UTC: %s\nDownloader exit code: %s\nScope: linked public pages and assets on howtolivebetter.net only; robots respected; no authenticated content or external sites.\nLimits: 45 minutes, 500 MB download quota.\nCompleteness is not guaranteed: inspect crawl.log for blocked, missing, or unlinked content.\nOriginal book attribution: eternity4719, CC BY 4.0 as stated by website. This does not assert a license for website code or third-party assets.\nTransformations: offline link conversion and HTML filename extension adjustment.\n' "$(date -u +%FT%TZ)" "$result" > MIRROR-STATUS.txt
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS.txt
+      - name: Upload snapshot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: howtolivebetter-public-mirror
+          path: mirrors/howtolivebetter.net
+      - name: Commit snapshot without changing existing library files
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add mirrors/howtolivebetter.net
+          if git diff --cached --quiet; then exit 0; fi
+          if find mirrors/howtolivebetter.net -type f -size +95M | grep -q .; then
+            echo 'A file exceeds the safe Git size limit; use the uploaded artifact. No snapshot committed.'
+            exit 1
+          fi
+          git commit -m 'Archive public HowToLiveBetter website snapshot'
+          git push origin HEAD:main
